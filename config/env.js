@@ -18,8 +18,8 @@ export const config = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   timezone: process.env.APP_TIMEZONE || 'Asia/Kolkata',
   cutoffTime: process.env.CUTOFF_TIME || '18:30',
-  webBaseUrl: process.env.WEB_BASE_URL || 'http://localhost:5173',
-  backendPublicUrl: process.env.BACKEND_PUBLIC_URL || 'http://localhost:4000',
+  webBaseUrl: process.env.WEB_BASE_URL || 'https://jpkm-checklist.netlify.app/',
+  backendPublicUrl: process.env.BACKEND_PUBLIC_URL || 'https://checklist-kyiq.onrender.com',
 
   maytapi: {
     productId: process.env.MAYTAPI_PRODUCT_ID,
