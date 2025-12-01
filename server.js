@@ -12,8 +12,13 @@ import publicRoutes from './routes/public.js';
 import { initCronJobs } from './services/scheduler.js';
 
 const app = express();
+const allowedOrigins = [
+  config.webBaseUrl,
+  "https://jpkm-checklist.netlify.app",
+  "https://jpkm-checklist.netlify.app/"
+];
 
-app.use(cors({ origin: config.webBaseUrl, credentials: true }));
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 
 app.get('/', (req, res) => {
