@@ -11,8 +11,11 @@ const router = express.Router();
 router.post('/register', async (req, res) => {
   try {
     const { name, email, password, department, whatsappNumber, role } = req.body;
+
     const existing = await User.findOne({ email });
-    if (existing) return res.status(400).json({ message: 'Email exists' });
+    if (existing) {
+      return res.status(400).json({ message: 'Email exists' });
+    }
 
     const plainPassword = password || '123456';
     const passwordHash = await User.hashPassword(plainPassword);
@@ -26,17 +29,22 @@ router.post('/register', async (req, res) => {
       role: role === 'ADMIN' ? 'ADMIN' : 'USER',
     });
 
-    // send welcome mail + whatsapp
-    await sendWelcomeMessage({
-      email: user.email,
-      name: user.name,
-      password: plainPassword,
-      whatsapp: user.whatsappNumber,
-      role: user.role,
-    });
+    // Best-effort welcome notification – don't fail if this breaks
+    try {
+      await sendWelcomeMessage({
+        email: user.email,
+        name: user.name,
+        password: plainPassword,
+        whatsapp: user.whatsappNumber,
+        role: user.role,
+      });
+    } catch (notifyErr) {
+      console.error('Failed to send welcome message (self-register):', notifyErr);
+    }
 
     const token = signToken(user);
-    res.json({
+
+    return res.json({
       token,
       user: {
         id: user._id,
@@ -46,28 +54,61 @@ router.post('/register', async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(500).json({ message: 'Error', error: err.message });
+    console.error('Register error:', err);
+    return res.status(500).json({
+      message: 'Error',
+      error: err.message,
+    });
   }
 });
 
 // -------- Login --------
-router.post('/login', async (req, res) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email });
-  if (!user) return res.status(400).json({ message: 'Invalid credentials' });
-  const ok = await user.comparePassword(password);
-  if (!ok) return res.status(400).json({ message: 'Invalid credentials' });
+router.post('/users', async (req, res) => {
+  try {
+    const { name, email, password, department, whatsappNumber, role } = req.body;
 
-  const token = signToken(user);
-  res.json({
-    token,
-    user: {
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-    },
-  });
+    const existing = await User.findOne({ email });
+    if (existing) {
+      return res.status(400).json({ message: 'Email exists' });
+    }
+
+    const plainPassword = password || '123456';
+    const passwordHash = await User.hashPassword(plainPassword);
+
+    const user = await User.create({
+      name,
+      email,
+      passwordHash,
+      department,
+      whatsappNumber,
+      role: role === 'ADMIN' ? 'ADMIN' : 'USER',
+    });
+
+    // Try to send welcome mail/WhatsApp, but don't break if it fails
+    try {
+      await sendWelcomeMessage({
+        email: user.email,
+        name: user.name,
+        password: plainPassword,
+        whatsapp: user.whatsappNumber,
+        role: user.role,
+      });
+    } catch (notifyErr) {
+      console.error('Failed to send welcome message (admin create user):', notifyErr);
+      // Don't rethrow – user is already created and should stay created
+    }
+
+    const plain = user.toObject();
+    delete plain.passwordHash;
+
+    return res.json(plain);
+  } catch (err) {
+    console.error('Error creating user (admin):', err);
+    return res.status(500).json({
+      message: 'Error creating user',
+      error: err.message,
+    });
+  }
 });
 
 // -------- Who am I --------
@@ -102,37 +143,59 @@ router.post('/change-password', authMiddleware, async (req, res) => {
 
 // -------- Request password reset (OTP to email + WhatsApp) --------
 router.post('/password-reset/request', async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ message: 'Email required' });
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ message: 'Email required' });
+    }
 
-  const user = await User.findOne({ email });
-  if (!user) return res.status(404).json({ message: 'User not found' });
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
 
-  const otp = String(Math.floor(100000 + Math.random() * 900000)); // 6-digit
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    // generate 6-digit OTP
+    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
-  // invalidate any previous tokens for this email
-  await PasswordResetToken.updateMany(
-    { email, used: false },
-    { used: true }
-  );
+    // invalidate previous tokens
+    await PasswordResetToken.updateMany(
+      { email, used: false },
+      { used: true }
+    );
 
-  await PasswordResetToken.create({
-    user: user._id,
-    email,
-    otp,
-    expiresAt,
-    used: false,
-  });
+    await PasswordResetToken.create({
+      user: user._id,
+      email,
+      otp,
+      expiresAt,
+      used: false,
+    });
 
-  await sendResetOtp({
-    email: user.email,
-    name: user.name,
-    otp,
-    whatsapp: user.whatsappNumber,
-  });
+    // Try to send OTP via email/WhatsApp – don't fail hard if this breaks
+    try {
+      await sendResetOtp({
+        email: user.email,
+        name: user.name,
+        otp,
+        whatsapp: user.whatsappNumber,
+      });
+    } catch (notifyErr) {
+      console.error('Failed to send reset OTP:', notifyErr);
+      // we still return success so the user can proceed with the OTP we generated
+    }
 
-  res.json({ message: 'OTP sent to email and WhatsApp (if configured)' });
+    return res.json({
+      message:
+        'OTP generated; if email/WhatsApp is configured it will be sent.',
+    });
+  } catch (err) {
+    console.error('Password reset request error:', err);
+    return res.status(500).json({
+      message: 'Error requesting password reset',
+      error: err.message,
+    });
+  }
 });
 
 // -------- Verify OTP & set new password --------
