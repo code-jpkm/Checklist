@@ -15,7 +15,9 @@ const app = express();
 const allowedOrigins = [
   config.webBaseUrl,
   "https://jpkm-checklist.netlify.app",
-  "https://jpkm-checklist.netlify.app/"
+  "https://jpkm-checklist.netlify.app/",
+  "http://localhost:5173",
+  "http://localhost:5173/"
 ];
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));
