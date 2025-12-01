@@ -81,7 +81,7 @@ router.put('/users/:id', async (req, res) => {
     delete plain.passwordHash;
     res.json(plain);
   } catch (err) {
-    res.status(500).json({ message: 'Error', error: err.message });
+    res.status(500).json({ message: err.message, error: err.message });
   }
 });
 
