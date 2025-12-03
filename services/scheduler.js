@@ -10,9 +10,10 @@ import {
   makeSubmissionToken,
   getCutoffDateTime,
 } from '../utils/dates.js';
-import { sendTaskEmail } from './mailer.js';
+// ❌ removed: import { sendTaskEmail } from './mailer.js';
 import { sendWhatsAppMessage } from './whatsapp.js';
 
+// Generate today's task occurrences and send notifications
 export const generateOccurrencesForToday = async () => {
   const today = new Date();
   const todayStr = toDateString(today);
@@ -37,11 +38,16 @@ export const generateOccurrencesForToday = async () => {
     });
 
     await occurrence.populate('template doer');
-    await sendTaskEmail(occurrence, template.doer);
+
+    // ❌ no email
+    // await sendTaskEmail(occurrence, template.doer);
+
+    // ✅ WhatsApp only
     await sendWhatsAppMessage(occurrence, template.doer);
   }
 };
 
+// Close tasks which passed cutoff time
 export const closeExpiredTasks = async () => {
   const today = new Date();
   const todayStr = toDateString(today);
@@ -65,7 +71,7 @@ export const cleanupResetTokens = async () => {
     updatedAt: { $lt: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
   });
 
-  // Optionally ensure no tokens exist with expiresAt < now and not used
+  // Ensure tokens that are expired are marked as used
   await PasswordResetToken.updateMany(
     { used: false, expiresAt: { $lt: now } },
     { used: true }
