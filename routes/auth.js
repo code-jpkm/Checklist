@@ -63,6 +63,45 @@ router.post('/register', async (req, res) => {
 });
 
 // -------- Login --------
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ message: "Email and password required" });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ message: "Invalid email or password" });
+    }
+
+    const valid = await user.comparePassword(password);
+    if (!valid) {
+      return res.status(400).json({ message: "Invalid email or password" });
+    }
+
+    const token = signToken(user);
+
+    return res.json({
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        department: user.department,
+        whatsappNumber: user.whatsappNumber,
+      },
+    });
+
+  } catch (err) {
+    console.error("Login error:", err);
+    return res.status(500).json({ message: "Login error", error: err.message });
+  }
+});
+
+// -------- Login --------
 router.post('/users', async (req, res) => {
   try {
     const { name, email, password, department, whatsappNumber, role } = req.body;
