@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
-    "seed:templates": "node seed/seedTemplates.js"
+    "seed:templates": "node seed/seedTemplates.js",
+    "jobs:run": "node scripts/runJobOnce.js"
   },
   "dependencies": {
     "axios": "^1.7.0",
