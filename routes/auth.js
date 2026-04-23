@@ -184,6 +184,7 @@ router.post('/change-password', authMiddleware, async (req, res) => {
 router.post('/password-reset/request', async (req, res) => {
   try {
     const { email } = req.body;
+
     if (!email) {
       return res.status(400).json({ message: 'Email required' });
     }
@@ -193,17 +194,15 @@ router.post('/password-reset/request', async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // generate 6-digit OTP
     const otp = String(Math.floor(100000 + Math.random() * 900000));
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
-    // invalidate previous tokens
     await PasswordResetToken.updateMany(
       { email, used: false },
       { used: true }
     );
 
-    await PasswordResetToken.create({
+    const tokenDoc = await PasswordResetToken.create({
       user: user._id,
       email,
       otp,
@@ -211,7 +210,6 @@ router.post('/password-reset/request', async (req, res) => {
       used: false,
     });
 
-    // Try to send OTP via email/WhatsApp – don't fail hard if this breaks
     try {
       await sendResetOtp({
         email: user.email,
@@ -221,12 +219,19 @@ router.post('/password-reset/request', async (req, res) => {
       });
     } catch (notifyErr) {
       console.error('Failed to send reset OTP:', notifyErr);
-      // we still return success so the user can proceed with the OTP we generated
+
+      tokenDoc.used = true;
+      await tokenDoc.save();
+
+      return res.status(500).json({
+        message:
+          'OTP could not be sent on WhatsApp. Please check WhatsApp number or Maytapi configuration.',
+        error: notifyErr.message,
+      });
     }
 
     return res.json({
-      message:
-        'OTP generated; if email/WhatsApp is configured it will be sent.',
+      message: 'OTP sent successfully on WhatsApp.',
     });
   } catch (err) {
     console.error('Password reset request error:', err);

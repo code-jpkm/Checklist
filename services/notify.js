@@ -1,10 +1,24 @@
 // server/services/notify.js
-// WhatsApp-only notifications (email completely disabled)
-
 import axios from 'axios';
 import { config } from '../config/env.js';
 
-// ---------- SMS helper (optional fallback) ----------
+function normalizeWhatsAppNumber(input) {
+  if (!input) return null;
+
+  let digits = String(input).replace(/[^\d]/g, '');
+
+  // remove leading 00
+  if (digits.startsWith('00')) {
+    digits = digits.slice(2);
+  }
+
+  // if user saved only 10-digit Indian number, prefix 91
+  if (digits.length === 10) {
+    digits = `91${digits}`;
+  }
+
+  return digits || null;
+}
 
 async function sendSmsIfEnabled(phoneNumber, message) {
   if (
@@ -16,45 +30,42 @@ async function sendSmsIfEnabled(phoneNumber, message) {
     return;
   }
 
-  try {
-    await axios.post(
-      config.sms.providerUrl,
-      {
-        to: phoneNumber,
-        message,
-        senderId: config.sms.senderId || 'TASKBOT',
+  await axios.post(
+    config.sms.providerUrl,
+    {
+      to: phoneNumber,
+      message,
+      senderId: config.sms.senderId || 'TASKBOT',
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${config.sms.apiKey}`,
+        'Content-Type': 'application/json',
       },
-      {
-        headers: {
-          Authorization: `Bearer ${config.sms.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-    console.log('SMS sent to', phoneNumber);
-  } catch (err) {
-    console.error('SMS send failed:', err.message);
-  }
+    }
+  );
 }
 
-// ---------- WhatsApp helper (Maytapi) ----------
+export async function sendWhatsAppText(rawPhoneNumber, message) {
+  const phoneNumber = normalizeWhatsAppNumber(rawPhoneNumber);
 
-async function sendWhatsAppIfPossible(phoneNumber, message) {
+  if (!phoneNumber) {
+    throw new Error('WhatsApp number missing or invalid');
+  }
+
   if (
-    !phoneNumber ||
     !config.maytapi ||
     !config.maytapi.productId ||
     !config.maytapi.phoneId ||
     !config.maytapi.apiKey
   ) {
-    console.log('WhatsApp not configured or phone missing, skipping');
-    return;
+    throw new Error('Maytapi configuration missing');
   }
 
   const url = `https://api.maytapi.com/api/${config.maytapi.productId}/${config.maytapi.phoneId}/sendMessage`;
 
   try {
-    await axios.post(
+    const response = await axios.post(
       url,
       {
         to_number: phoneNumber,
@@ -64,20 +75,37 @@ async function sendWhatsAppIfPossible(phoneNumber, message) {
       {
         headers: {
           'x-maytapi-key': config.maytapi.apiKey,
+          'Content-Type': 'application/json',
         },
       }
     );
+
     console.log('WhatsApp sent to', phoneNumber);
+    return response.data;
   } catch (err) {
-    console.error('WhatsApp send failed:', err.message);
-    // optional: fallback to SMS
-    await sendSmsIfEnabled(phoneNumber, message);
+    const maytapiError =
+      err?.response?.data?.message ||
+      err?.response?.data?.error ||
+      err?.response?.data ||
+      err.message;
+
+    console.error('WhatsApp send failed:', maytapiError);
+
+    // optional fallback
+    try {
+      await sendSmsIfEnabled(phoneNumber, message);
+    } catch (smsErr) {
+      console.error('SMS fallback also failed:', smsErr.message);
+    }
+
+    throw new Error(
+      typeof maytapiError === 'string'
+        ? maytapiError
+        : JSON.stringify(maytapiError)
+    );
   }
 }
 
-// ---------- Branded templates (WhatsApp ONLY) ----------
-
-// New user / welcome
 export async function sendWelcomeMessage({
   email,
   name,
@@ -100,14 +128,14 @@ Role: ${role}
 Please login and change your password.
 `.trim();
 
-  if (whatsapp) {
-    await sendWhatsAppIfPossible(whatsapp, waMessage);
-  } else {
-    console.log('[Welcome] No WhatsApp number, not sending anything');
+  if (!whatsapp) {
+    console.log('[Welcome] No WhatsApp number, skipping welcome message');
+    return;
   }
+
+  await sendWhatsAppText(whatsapp, waMessage);
 }
 
-// Password reset OTP
 export async function sendResetOtp({ email, name, otp, whatsapp }) {
   const waMessage = `
 Task Checklist Password Reset
@@ -120,9 +148,9 @@ This code is valid for 10 minutes.
 If you did not request this, you can ignore this message.
 `.trim();
 
-  if (whatsapp) {
-    await sendWhatsAppIfPossible(whatsapp, waMessage);
-  } else {
-    console.log('[Reset OTP] No WhatsApp number, not sending anything');
+  if (!whatsapp) {
+    throw new Error('User does not have a WhatsApp number');
   }
+
+  await sendWhatsAppText(whatsapp, waMessage);
 }
